@@ -4,6 +4,7 @@ import {User} from "../models/user.model.js"
 import {uploadOnCloudinary} from "../utils/Cloudinary.js"
 import { Apiresponse } from "../utils/Apiresponse.js"
 import jwt from "jsonwebtoken"
+import mongoose from "mongoose"
 
 
 const generateAccessAndRefreshTokens = async(userId) => {
@@ -325,6 +326,129 @@ const updateUserCoverImage = asyncHandler(async(req,res) => {
     .json(200,user,new Apiresponse(200,user,"Cover Image Updated Successfully "))
 })
 
+const getUserChannelProfile = asyncHandler(async (req,res) => {
+
+    const {username} = req.params
+
+    if(!username?.trim()){
+        throw new ApiError(400,"Username is missing")
+    }
+
+    const channel = await User.aggregate([
+        {
+            $match: {
+                username: username?.toLowerCase()
+            }
+        },
+        {
+            $lookup:{
+                from:"subscriptions",
+                localField:"_id",
+                foreignField:"channel",
+                as: "subscribers"
+            }
+        },
+        {
+            $lookup:{
+                from:"subscriptions",
+                localField:"_id",
+                foreignField:"subscriber",
+                as: "subscribedTO"
+            }
+        },
+        {
+            $addFields:{
+                subscribersCount: {
+                    $size: "$subscribers"
+                },
+                channelSubscribedToCount:{
+                    $size: "$subscribedTO"
+                },
+                isSubscribed:{
+                    $cond:{
+                        if: {$in: [req.user?._id,"$subscribers,subscriber"]},
+                        then:true,
+                        else:false
+                    }
+                }
+            }
+        },
+        {
+            $project:{
+                fullName: 1,
+                username: 1,
+                subscribersCount: 1,
+                channelSubscribedToCount: 1,
+                isSubscribed: 1,
+                avatar: 1,
+                coverImage: 1,
+                email: 1,
+            }
+        }
+    ])
+    // console.log(channel);
+
+    if(!channel?.length){
+        throw new ApiError(404,"Channel Does Not Exists ")
+    }
+
+    return res
+    .status(200)
+    .json(
+        new Apiresponse(200,channel[0],"User Channel Matched Successfully ")
+    )
+})
+
+const getWatchHistory = asyncHandler(async(req,res) => {
+    const user = await User.aggregate([
+        {
+            $match:{
+                _id: new mongoose.Types.ObjectId(req.user._id),
+            }
+        },
+        {
+            $lookup:{
+                from:"videos",
+                localField: "watchHistory",
+                foreignField: "_id",
+                as: "watchHistory",
+                pipeline: [
+                    {
+                        $lookup:{
+                            from: "users",
+                            localField: "owner",
+                            foreignField: "_id",
+                            as:"owner",
+                            pipeline: [
+                                {
+                                    $project: {
+                                        fullName: 1,
+                                        username: 1,
+                                        avatar: 1,
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        $addFields:{
+                            owner:{
+                                $first: "$owner"
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+    ])
+
+    return res
+    .status(200)
+    .json(
+        new Apiresponse(200,user[0].watchHistory,"Watch History Fetched")
+    )
+})
+
 export { 
     registerUser,
     loginUser,
@@ -335,5 +459,7 @@ export {
     updateAccountDetails,
     updateUserAvatar,
     updateUserCoverImage,
-
+    getUserChannelProfile,
+    getWatchHistory,
+    
 }
